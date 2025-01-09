@@ -1,0 +1,52 @@
+{
+  "name": "manifold-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for interacting with Manifold Markets prediction markets",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "manifold-mcp-server": "./build/index.js"
+  },
+  "files": [
+    "build",
+    "build/**/*.d.ts",
+    "build/**/*.d.ts.map",
+    "build/**/*.js.map",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "build/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/barton/infinity-topos"
+  },
+  "keywords": [
+    "mcp",
+    "manifold",
+    "prediction-markets",
+    "llm",
+    "claude"
+  ],
+  "author": "Barton Rhodes",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "clean": "rm -rf build",
+    "build": "tsc && chmod +x build/index.js",
+    "start": "node build/index.js",
+    "dev": "ts-node-esm src/index.ts",
+    "test": "vitest",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.1.0",
+    "node-fetch": "^3.3.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.12",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2",
+    "vitest": "^0.34.6"
+  }
+}
