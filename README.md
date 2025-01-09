@@ -95,76 +95,120 @@ Send mana to other users:
 - amount: Amount of mana to send (min 10)
 - message: Optional message to include
 
-## Example: The Xenoduck Society's Quantum Navigation Dilemma
+## Example: The Cosmic Hole Research Institute's Grand Investigation
 
-The Xenoduck Society of Restless Mind from the Pleiades Cluster uses prediction markets to make critical decisions about their interstellar ventures. Here's how they might use the Manifold MCP Server to gather collective intelligence about a new quantum navigation technology:
+The Cosmic Hole Research Institute (CHRI) uses prediction markets to coordinate their groundbreaking research into the relationship between white holes and black holes. Here's how they leverage the Manifold MCP Server to aggregate knowledge and make decisions:
 
 ```typescript
-// Search for relevant markets
+// Search for markets related to white hole research
 const searchResponse = await use_mcp_tool({
   name: "search_markets",
   arguments: {
-    term: "quantum navigation success probability",
+    term: "white hole quantum emission detection 2024",
     filter: "open",
     sort: "liquidity"
   }
 });
 
-// Get details of the most relevant market
+// Get details of the primary research market
 const marketDetails = await use_mcp_tool({
   name: "get_market",
   arguments: {
-    marketId: "quantum-nav-2024"
+    marketId: "white-hole-detection-2024"
   }
 });
 
-// The Council of Elder Ducks places a bet
+// Dr. Lumina, expert in white hole radiation, places a confident bet
 const betResponse = await use_mcp_tool({
   name: "place_bet",
   arguments: {
-    marketId: "quantum-nav-2024",
-    amount: 1000,
+    marketId: "white-hole-detection-2024",
+    amount: 2000,
     outcome: "YES",
-    limitProb: 0.75 // They're quite confident!
+    limitProb: 0.85 // High confidence based on recent quantum readings
   }
 });
 
-// Junior Navigator Quacksworth adds liquidity
+// Dr. Void, black hole specialist, adds counter-evidence
+const counterBet = await use_mcp_tool({
+  name: "place_bet",
+  arguments: {
+    marketId: "white-hole-detection-2024",
+    amount: 1500,
+    outcome: "NO",
+    limitProb: 0.40 // Skeptical based on gravitational data
+  }
+});
+
+// The Institute's Quantum Computing Division provides market liquidity
 const liquidityResponse = await use_mcp_tool({
   name: "add_liquidity",
   arguments: {
-    marketId: "quantum-nav-2024",
-    amount: 500
+    marketId: "white-hole-detection-2024",
+    amount: 1000 // Ensuring efficient price discovery
   }
 });
 
-// Check the Society's positions
+// Check Dr. Lumina's current positions
 const positions = await use_mcp_tool({
   name: "get_positions",
   arguments: {
-    userId: "xenoduck-society"
+    userId: "dr-lumina"
   }
 });
 
-// Reward successful predictions
+// Dr. Lumina spots an error in their calculations
+const cancelBet = await use_mcp_tool({
+  name: "cancel_bet",
+  arguments: {
+    betId: "bet-42-lumina"
+  }
+});
+
+// Dr. Void's theory gains support
+const sellShares = await use_mcp_tool({
+  name: "sell_shares",
+  arguments: {
+    marketId: "white-hole-detection-2024",
+    outcome: "YES",
+    shares: 100 // Reducing exposure to positive outcome
+  }
+});
+
+// Get information about a new researcher
+const userInfo = await use_mcp_tool({
+  name: "get_user",
+  arguments: {
+    username: "quantum-theorist-alice"
+  }
+});
+
+// Reward junior researchers for valuable insights
 const rewardResponse = await use_mcp_tool({
   name: "send_mana",
   arguments: {
-    toIds: ["quacksworth", "elder-duck-1", "elder-duck-2"],
-    amount: 100,
-    message: "Thank you for your accurate quantum navigation predictions!"
+    toIds: ["junior-researcher-bob", "quantum-theorist-alice"],
+    amount: 200,
+    message: "Excellent analysis of quantum vacuum fluctuations near the event horizon!"
   }
 });
 ```
 
-In this example, the Xenoduck Society uses prediction markets to:
-1. Aggregate knowledge about quantum navigation technology
-2. Allow experts to signal their confidence through bet sizes and limit orders
+In this cosmic scenario, the CHRI uses prediction markets to:
+1. Track confidence in white hole detection
+2. Allow experts to signal their beliefs through strategic betting
 3. Maintain market efficiency through liquidity provision
-4. Track their collective positions
-5. Reward successful predictors
+4. Manage positions as new evidence emerges
+5. Incentivize quality research and analysis
 
-This demonstrates how prediction markets can help even advanced civilizations make better decisions through collective intelligence!
+The market aggregates various theoretical perspectives:
+- White hole radiation signatures
+- Event horizon topology differences
+- Quantum vacuum fluctuations
+- Gravitational wave patterns
+- Information preservation theories
+
+This demonstrates how prediction markets can help coordinate complex scientific research and aggregate expert knowledge across multiple theoretical frameworks!
 
 ## Development
 
