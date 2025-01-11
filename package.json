@@ -1,7 +1,7 @@
 {
   "name": "manifold-mcp-server",
-  "version": "0.1.1",
-  "description": "MCP server for interacting with Manifold Markets prediction markets",
+  "version": "0.2.0",
+  "description": "Comprehensive MCP server for Manifold Markets providing market creation, trading, liquidity management, and social features",
   "type": "module",
   "main": "build/index.js",
   "bin": {
@@ -25,7 +25,11 @@
     "manifold",
     "prediction-markets",
     "llm",
-    "claude"
+    "claude",
+    "trading",
+    "market-making",
+    "collective-intelligence",
+    "forecasting"
   ],
   "author": "Barton Rhodes",
   "license": "MIT",
@@ -36,6 +40,10 @@
     "start": "node build/index.js",
     "dev": "ts-node-esm src/index.ts",
     "test": "vitest",
+    "test:market": "vitest run market.test.ts",
+    "test:trading": "vitest run trading.test.ts",
+    "test:liquidity": "vitest run liquidity.test.ts",
+    "test:social": "vitest run social.test.ts",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "dependencies": {

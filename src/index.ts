@@ -27,8 +27,14 @@ const server = new Server(
 const CreateMarketSchema = z.object({
   outcomeType: z.enum(['BINARY', 'MULTIPLE_CHOICE', 'PSEUDO_NUMERIC', 'POLL', 'BOUNTIED_QUESTION']),
   question: z.string(),
-  description: z.string().optional(),
-  closeTime: z.string().optional(),
+  description: z.union([
+    z.string(),
+    z.object({
+      type: z.literal('doc'),
+      content: z.array(z.any()),
+    })
+  ]).optional(),
+  closeTime: z.number().optional(), // Unix timestamp in milliseconds
   visibility: z.enum(['public', 'unlisted']).optional(),
   initialProb: z.number().min(1).max(99).optional(),
   min: z.number().optional(),
@@ -39,6 +45,7 @@ const CreateMarketSchema = z.object({
   addAnswersMode: z.enum(['DISABLED', 'ONLY_CREATOR', 'ANYONE']).optional(),
   shouldAnswersSumToOne: z.boolean().optional(),
   totalBounty: z.number().optional(),
+  groupIds: z.array(z.string()).optional(),
 });
 
 const SearchMarketsSchema = z.object({
@@ -80,6 +87,49 @@ const AddLiquiditySchema = z.object({
 
 const CancelBetSchema = z.object({
   betId: z.string(),
+});
+
+const UnresolveMarketSchema = z.object({
+  contractId: z.string(),
+  answerId: z.string().optional(),
+});
+
+const CloseMarketSchema = z.object({
+  contractId: z.string(),
+  closeTime: z.number().int().nonnegative().optional(),
+});
+
+const AddAnswerSchema = z.object({
+  contractId: z.string(),
+  text: z.string().min(1),
+});
+
+const FollowMarketSchema = z.object({
+  contractId: z.string(),
+  follow: z.boolean(),
+});
+
+const AddBountySchema = z.object({
+  contractId: z.string(),
+  amount: z.number().positive().finite(),
+});
+
+const AwardBountySchema = z.object({
+  contractId: z.string(),
+  commentId: z.string(),
+  amount: z.number().positive().finite(),
+});
+
+const RemoveLiquiditySchema = z.object({
+  contractId: z.string(),
+  amount: z.number().positive().finite(),
+});
+
+const ReactSchema = z.object({
+  contentId: z.string(),
+  contentType: z.enum(['comment', 'contract']),
+  remove: z.boolean().optional(),
+  reactionType: z.enum(['like', 'dislike']).default('like'),
 });
 
 const SendManaSchema = z.object({
@@ -261,6 +311,105 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'unresolve_market',
+      description: 'Unresolve a previously resolved market',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          answerId: { type: 'string', description: 'Optional. Answer ID for multiple choice markets' }
+        },
+        required: ['contractId']
+      }
+    },
+    {
+      name: 'close_market',
+      description: 'Close a market for trading',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          closeTime: { type: 'number', description: 'Optional. Unix timestamp in milliseconds when market will close' }
+        },
+        required: ['contractId']
+      }
+    },
+    {
+      name: 'add_answer',
+      description: 'Add a new answer to a multiple choice market',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          text: { type: 'string', description: 'Answer text' }
+        },
+        required: ['contractId', 'text']
+      }
+    },
+    {
+      name: 'follow_market',
+      description: 'Follow or unfollow a market',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          follow: { type: 'boolean', description: 'True to follow, false to unfollow' }
+        },
+        required: ['contractId', 'follow']
+      }
+    },
+    {
+      name: 'add_bounty',
+      description: 'Add bounty to a market',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          amount: { type: 'number', description: 'Amount of mana to add as bounty' }
+        },
+        required: ['contractId', 'amount']
+      }
+    },
+    {
+      name: 'award_bounty',
+      description: 'Award bounty to a comment',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          commentId: { type: 'string', description: 'Comment ID to award bounty to' },
+          amount: { type: 'number', description: 'Amount of bounty to award' }
+        },
+        required: ['contractId', 'commentId', 'amount']
+      }
+    },
+    {
+      name: 'remove_liquidity',
+      description: 'Remove liquidity from market pool',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contractId: { type: 'string', description: 'Market ID' },
+          amount: { type: 'number', description: 'Amount of liquidity to remove' }
+        },
+        required: ['contractId', 'amount']
+      }
+    },
+    {
+      name: 'react',
+      description: 'React to a market or comment',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contentId: { type: 'string', description: 'ID of market or comment' },
+          contentType: { type: 'string', enum: ['comment', 'contract'], description: 'Type of content to react to' },
+          remove: { type: 'boolean', description: 'Optional. True to remove reaction' },
+          reactionType: { type: 'string', enum: ['like', 'dislike'], description: 'Type of reaction' }
+        },
+        required: ['contentId', 'contentType']
+      }
+    },
+    {
       name: 'send_mana',
       description: 'Send mana to other users',
       inputSchema: {
@@ -331,6 +480,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               );
             }
             break;
+        }
+
+        // Convert string description to TipTap format if needed
+        if (typeof params.description === 'string') {
+          params.description = {
+            type: 'doc',
+            content: [
+              {
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'text',
+                    text: params.description
+                  }
+                ]
+              }
+            ]
+          };
         }
 
         const response = await fetch(`${API_BASE}/v0/market`, {
@@ -612,6 +779,309 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(positions, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'unresolve_market': {
+        const params = UnresolveMarketSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/unresolve`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Market unresolved successfully',
+            },
+          ],
+        };
+      }
+
+      case 'close_market': {
+        const params = CloseMarketSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/close`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            closeTime: params.closeTime,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Market closed successfully',
+            },
+          ],
+        };
+      }
+
+      case 'add_answer': {
+        const params = AddAnswerSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/answer`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            text: params.text,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        const result = await response.json();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Answer added with ID: ${result.newAnswerId}`,
+            },
+          ],
+        };
+      }
+
+      case 'follow_market': {
+        const params = FollowMarketSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/follow-contract`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            contractId: params.contractId,
+            follow: params.follow,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: params.follow ? 'Now following market' : 'Unfollowed market',
+            },
+          ],
+        };
+      }
+
+      case 'add_bounty': {
+        const params = AddBountySchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/add-bounty`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            amount: params.amount,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Bounty added successfully',
+            },
+          ],
+        };
+      }
+
+      case 'award_bounty': {
+        const params = AwardBountySchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/award-bounty`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            commentId: params.commentId,
+            amount: params.amount,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Bounty awarded successfully',
+            },
+          ],
+        };
+      }
+
+      case 'remove_liquidity': {
+        const params = RemoveLiquiditySchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/remove-liquidity`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify({
+            amount: params.amount,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Liquidity removed successfully',
+            },
+          ],
+        };
+      }
+
+      case 'react': {
+        const params = ReactSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        const response = await fetch(`${API_BASE}/v0/react`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: params.remove ? 'Reaction removed' : 'Reaction added',
             },
           ],
         };

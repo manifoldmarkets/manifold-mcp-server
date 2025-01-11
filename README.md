@@ -1,40 +1,83 @@
 # Manifold Markets MCP Server
 
-An MCP server for interacting with Manifold Markets prediction markets. This server enables MCP clients to seamlessly interact with prediction markets, enabling collective intelligence and decision-making through market mechanisms.
+An MCP server for interacting with Manifold Markets prediction markets. This server provides comprehensive access to Manifold's features through a clean MCP interface, enabling sophisticated market interactions and collective intelligence mechanisms.
 
-## Features
+## Architecture
 
-- Search and filter prediction markets with advanced criteria
-- Get detailed market information and analytics
-- Place bets and limit orders with precise probability specifications
-- Track user positions and portfolio performance
-- Send mana between users
-- Manage market liquidity
-- Cancel and sell positions
+The server implements a complete mapping of Manifold Markets' API capabilities through a structured tool system:
 
-## Roadmap
+### Core Components
+- **Schema Layer**: Zod-based validation schemas for all operations
+- **API Integration**: Direct mapping to Manifold's REST endpoints
+- **Tool Handlers**: Request processing with proper error management
+- **Type Safety**: Full TypeScript implementation
 
-- [x] Market search and filtering
-- [x] Market details and analytics
-- [x] User profile management
-- [x] Bet placement with limit orders
-- [x] Position management and cancellation
-- [x] Share selling functionality
-- [x] Portfolio tracking
-- [x] Liquidity provision
-- [x] Mana transfer system
-- [x] Basic market statistics
+### Tool Categories
 
-Planned higher-order capabilities:
-- [ ] Intelligent portfolio optimization and risk management
-- [ ] Advanced market analysis with sentiment and correlations
-- [ ] Social intelligence and expert network analysis
+#### Market Creation & Management
+- `create_market`: Create markets (BINARY, MULTIPLE_CHOICE, PSEUDO_NUMERIC, POLL)
+- `unresolve_market`: Revert resolved markets
+- `close_market`: Close markets for trading
+- `add_answer`: Add options to multiple choice markets
+
+#### Market Interaction
+- `follow_market`: Track markets of interest
+- `react`: Like/dislike markets and comments
+- `add_bounty`: Add bounties for analysis
+- `award_bounty`: Reward valuable contributions
+
+#### Trading Operations
+- `place_bet`: Execute market trades
+- `cancel_bet`: Cancel limit orders
+- `sell_shares`: Liquidate positions
+
+#### Liquidity Management
+- `add_liquidity`: Provide market liquidity
+- `remove_liquidity`: Withdraw provided liquidity
+
+#### Information Retrieval
+- `search_markets`: Find markets with filters
+- `get_market`: Detailed market information
+- `get_user`: User profile data
+- `get_positions`: Portfolio tracking
+
+#### Social Features
+- `send_mana`: Transfer mana between users
+
+## Verified Capabilities
+
+The server has been tested through comprehensive interaction trajectories:
+
+### Successfully Tested
+1. Market Discovery & Following
+   - ✅ Market search with filters
+   - ✅ Market following
+   - ✅ Detailed market information retrieval
+
+2. Trading Operations
+   - ✅ Liquidity provision
+   - ✅ Bet placement with probability updates
+   - ✅ Position liquidation
+   - ✅ Share selling
+
+3. Permission Management
+   - ✅ Role-based access control
+   - ✅ Authentication handling
+   - ✅ Error messaging
+
+### Permission-Restricted Operations
+These operations are implemented but require specific user roles:
+- Market resolution/unresolving (market creator)
+- Market closing (market creator)
+- Bounty management (market creator)
+- Liquidity removal (liquidity provider)
 
 ## Prerequisites
 
 - Node.js 18 or higher
 - npm or yarn
-- A Manifold Markets API key
+- Manifold Markets API key
+- Minimum M$1000 balance for market creation
 
 ## Installation
 
@@ -49,6 +92,7 @@ npm install manifold-mcp-server
 1. Log in to [Manifold Markets](https://manifold.markets)
 2. Go to your profile settings
 3. Generate an API key
+4. Ensure account has sufficient mana for intended operations
 
 ### 3. Configure MCP Settings
 
@@ -88,58 +132,145 @@ Add to `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude
 }
 ```
 
-### 4. Verify Installation
+## Tool Documentation
 
-After configuring, restart your Claude client and verify the server appears in the connected MCP servers list.
+### Market Creation & Management
 
-## Available Tools
+#### create_market
+Create a new prediction market:
+```typescript
+{
+  outcomeType: 'BINARY' | 'MULTIPLE_CHOICE' | 'PSEUDO_NUMERIC' | 'POLL' | 'BOUNTIED_QUESTION'
+  question: string
+  description?: string | {
+    type: 'doc'
+    content: any[]
+  }
+  closeTime?: number // Unix timestamp ms
+  visibility?: 'public' | 'unlisted'
+  initialProb?: number // Required for BINARY (1-99)
+  min?: number // Required for PSEUDO_NUMERIC
+  max?: number // Required for PSEUDO_NUMERIC
+  isLogScale?: boolean
+  initialValue?: number // Required for PSEUDO_NUMERIC
+  answers?: string[] // Required for MULTIPLE_CHOICE/POLL
+  addAnswersMode?: 'DISABLED' | 'ONLY_CREATOR' | 'ANYONE'
+  shouldAnswersSumToOne?: boolean
+  totalBounty?: number // Required for BOUNTIED_QUESTION
+}
+```
 
-### search_markets
-Search for prediction markets with optional filters:
-- term: Search query
-- limit: Max number of results (1-100)
-- filter: 'all', 'open', 'closed', or 'resolved'
-- sort: 'newest', 'score', or 'liquidity'
+#### unresolve_market
+Unresolve a previously resolved market:
+```typescript
+{
+  contractId: string
+  answerId?: string // For multiple choice markets
+}
+```
 
-### get_market
-Get detailed information about a specific market:
-- marketId: Market ID
+#### close_market
+Close a market for trading:
+```typescript
+{
+  contractId: string
+  closeTime?: number // Optional close time
+}
+```
 
-### get_user
-Get user information by username:
-- username: Username
+### Market Interaction
 
-### place_bet
+#### follow_market
+Follow or unfollow a market:
+```typescript
+{
+  contractId: string
+  follow: boolean
+}
+```
+
+#### react
+React to markets or comments:
+```typescript
+{
+  contentId: string
+  contentType: 'comment' | 'contract'
+  remove?: boolean
+  reactionType: 'like' | 'dislike'
+}
+```
+
+### Trading Operations
+
+#### place_bet
 Place a bet on a market:
-- marketId: Market ID
-- amount: Amount to bet in mana
-- outcome: 'YES' or 'NO'
-- limitProb: Optional limit order probability (0.01-0.99)
+```typescript
+{
+  marketId: string
+  amount: number
+  outcome: 'YES' | 'NO'
+  limitProb?: number // 0.01-0.99
+}
+```
 
-### cancel_bet
-Cancel a limit order bet:
-- betId: Bet ID to cancel
-
-### sell_shares
+#### sell_shares
 Sell shares in a market:
-- marketId: Market ID
-- outcome: Which type of shares to sell ('YES' or 'NO', defaults to what you have)
-- shares: How many shares to sell (defaults to all)
+```typescript
+{
+  marketId: string
+  outcome?: 'YES' | 'NO'
+  shares?: number // Defaults to all
+}
+```
 
-### add_liquidity
-Add mana to market liquidity pool:
-- marketId: Market ID
-- amount: Amount of mana to add
+### Liquidity Management
 
-### get_positions
-Get user positions across markets:
-- userId: User ID
+#### add_liquidity
+Add liquidity to market pool:
+```typescript
+{
+  marketId: string
+  amount: number
+}
+```
 
-### send_mana
-Send mana to other users:
-- toIds: Array of user IDs to send mana to
-- amount: Amount of mana to send (min 10)
-- message: Optional message to include
+#### remove_liquidity
+Remove liquidity from market pool:
+```typescript
+{
+  contractId: string
+  amount: number
+}
+```
+
+## Error Handling
+
+The server implements comprehensive error handling:
+
+1. Input Validation
+   - Parameter type checking via Zod schemas
+   - Value range validation
+   - Required field verification
+
+2. API Communication
+   - Authentication errors
+   - Network failures
+   - Rate limiting
+   - Permission checks
+
+3. Business Logic
+   - Insufficient balance
+   - Invalid market states
+   - Unauthorized operations
+
+4. Error Response Format
+```typescript
+{
+  code: ErrorCode
+  message: string
+  details?: any
+}
+```
 
 ## Development
 
@@ -154,40 +285,25 @@ npm install
 # Build
 npm run build
 
-# Start the server
-npm start
-
-# Run in development mode
-npm run dev
-
 # Run tests
 npm test
 ```
 
-## Error Handling
-
-The server implements error handling for:
-- Invalid parameters (type checking and validation)
-- Missing or invalid API keys
-- Network and API communication errors
-- Unknown tool requests
-
-Additional error handling is provided by the Manifold Markets API for specific market operations.
-
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. We're particularly interested in:
-- Additional market analysis tools
-- Enhanced probability calibration features
-- Integration with other prediction market platforms
-- Improved documentation and examples
+Contributions welcome! Areas of interest:
+- Advanced market analysis tools
+- Portfolio optimization features
+- Integration with other prediction platforms
+- Documentation improvements
 
-## Security Considerations
+## Security
 
-- API keys are handled securely through environment variables
-- Input validation for all parameters
+- API keys handled via environment variables
+- Input validation on all parameters
 - Rate limiting protection
-- Error messages don't expose sensitive information
+- Safe error messages
+- Role-based access control
 
 ## License
 
