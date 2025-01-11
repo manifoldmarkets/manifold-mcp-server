@@ -24,7 +24,23 @@ const server = new Server(
 );
 
 // Tool schemas
-// Tool schemas
+const CreateMarketSchema = z.object({
+  outcomeType: z.enum(['BINARY', 'MULTIPLE_CHOICE', 'PSEUDO_NUMERIC', 'POLL', 'BOUNTIED_QUESTION']),
+  question: z.string(),
+  description: z.string().optional(),
+  closeTime: z.string().optional(),
+  visibility: z.enum(['public', 'unlisted']).optional(),
+  initialProb: z.number().min(1).max(99).optional(),
+  min: z.number().optional(),
+  max: z.number().optional(),
+  isLogScale: z.boolean().optional(),
+  initialValue: z.number().optional(),
+  answers: z.array(z.string()).optional(),
+  addAnswersMode: z.enum(['DISABLED', 'ONLY_CREATOR', 'ANYONE']).optional(),
+  shouldAnswersSumToOne: z.boolean().optional(),
+  totalBounty: z.number().optional(),
+});
+
 const SearchMarketsSchema = z.object({
   term: z.string().optional(),
   limit: z.number().min(1).max(100).optional(),
@@ -75,6 +91,76 @@ const SendManaSchema = z.object({
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
+    {
+      name: 'create_market',
+      description: 'Create a new prediction market',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          outcomeType: {
+            type: 'string',
+            enum: ['BINARY', 'MULTIPLE_CHOICE', 'PSEUDO_NUMERIC', 'POLL', 'BOUNTIED_QUESTION'],
+            description: 'Type of market to create'
+          },
+          question: {
+            type: 'string',
+            description: 'The headline question for the market'
+          },
+          description: {
+            type: 'string',
+            description: 'Optional description for the market'
+          },
+          closeTime: {
+            type: 'string',
+            description: 'Optional. ISO timestamp when market will close. Defaults to 7 days.'
+          },
+          visibility: {
+            type: 'string',
+            enum: ['public', 'unlisted'],
+            description: 'Optional. Market visibility. Defaults to public.'
+          },
+          initialProb: {
+            type: 'number',
+            description: 'Required for BINARY markets. Initial probability (1-99)'
+          },
+          min: {
+            type: 'number',
+            description: 'Required for PSEUDO_NUMERIC markets. Minimum resolvable value'
+          },
+          max: {
+            type: 'number',
+            description: 'Required for PSEUDO_NUMERIC markets. Maximum resolvable value'
+          },
+          isLogScale: {
+            type: 'boolean',
+            description: 'Optional for PSEUDO_NUMERIC markets. If true, increases exponentially'
+          },
+          initialValue: {
+            type: 'number',
+            description: 'Required for PSEUDO_NUMERIC markets. Initial value between min and max'
+          },
+          answers: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Required for MULTIPLE_CHOICE/POLL markets. Array of possible answers'
+          },
+          addAnswersMode: {
+            type: 'string',
+            enum: ['DISABLED', 'ONLY_CREATOR', 'ANYONE'],
+            description: 'Optional for MULTIPLE_CHOICE markets. Controls who can add answers'
+          },
+          shouldAnswersSumToOne: {
+            type: 'boolean',
+            description: 'Optional for MULTIPLE_CHOICE markets. Makes probabilities sum to 100%'
+          },
+          totalBounty: {
+            type: 'number',
+            description: 'Required for BOUNTIED_QUESTION markets. Amount of mana for bounty'
+          }
+        },
+        required: ['outcomeType', 'question']
+      }
+    },
     {
       name: 'search_markets',
       description: 'Search for prediction markets with optional filters',
@@ -200,6 +286,79 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case 'create_market': {
+        const params = CreateMarketSchema.parse(args);
+        const apiKey = process.env.MANIFOLD_API_KEY;
+        if (!apiKey) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            'MANIFOLD_API_KEY environment variable is required'
+          );
+        }
+
+        // Validate required fields based on market type
+        switch (params.outcomeType) {
+          case 'BINARY':
+            if (!params.initialProb) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'initialProb is required for BINARY markets'
+              );
+            }
+            break;
+          case 'PSEUDO_NUMERIC':
+            if (!params.min || !params.max || !params.initialValue) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'min, max, and initialValue are required for PSEUDO_NUMERIC markets'
+              );
+            }
+            break;
+          case 'MULTIPLE_CHOICE':
+          case 'POLL':
+            if (!params.answers || !Array.isArray(params.answers)) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'answers array is required for MULTIPLE_CHOICE/POLL markets'
+              );
+            }
+            break;
+          case 'BOUNTIED_QUESTION':
+            if (!params.totalBounty) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'totalBounty is required for BOUNTIED_QUESTION markets'
+              );
+            }
+            break;
+        }
+
+        const response = await fetch(`${API_BASE}/v0/market`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Key ${apiKey}`,
+          },
+          body: JSON.stringify(params),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${error}`
+          );
+        }
+
+        const market = await response.json();
+        return {
+          content: [{
+            type: 'text',
+            text: `Created market: ${market.url}`,
+          }],
+        };
+      }
+
       case 'search_markets': {
         const params = SearchMarketsSchema.parse(args);
         const searchParams = new URLSearchParams();
