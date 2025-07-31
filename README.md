@@ -1,3 +1,6 @@
+
+# *⚠️CURRENTLY UNDER CONSTRUCTION⚠️*  
+
 # Manifold Markets MCP Server
 
 An MCP server for interacting with Manifold Markets prediction markets. This server provides comprehensive access to Manifold's features through a clean MCP interface, enabling sophisticated market interactions and collective intelligence mechanisms.
