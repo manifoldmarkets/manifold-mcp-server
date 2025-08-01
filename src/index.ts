@@ -3,9 +3,9 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema,
-  McpError,
   ErrorCode,
+  ListToolsRequestSchema,
+  McpError
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 
@@ -14,7 +14,7 @@ const API_BASE = 'https://api.manifold.markets';
 const server = new Server(
   {
     name: 'manifold-markets',
-    version: '0.1.0',
+    version: '0.2.0',
   },
   {
     capabilities: {
@@ -23,30 +23,84 @@ const server = new Server(
   }
 );
 
-// Tool schemas
-const CreateMarketSchema = z.object({
-  outcomeType: z.enum(['BINARY', 'MULTIPLE_CHOICE', 'PSEUDO_NUMERIC', 'POLL', 'BOUNTIED_QUESTION']),
-  question: z.string(),
-  description: z.union([
-    z.string(),
-    z.object({
+const MAX_ANSWERS = 100;
+const MAX_MULTI_NUMERIC_ANSWERS = 12;
+const NON_POINTS_BETS_LIMIT = 10_000;
+
+// Market type specific schemas
+const createBinarySchema = z.object({
+  outcomeType: z.enum(['BINARY', 'STONK']),
+  initialProb: z.number().min(1).max(99).optional(),
+});
+
+const createMultiSchema = z.object({
+  outcomeType: z.enum(['MULTIPLE_CHOICE']),
+  answers: z.array(z.string().trim().min(1)).max(MAX_ANSWERS),
+  answerShortTexts: z
+    .array(z.string().trim().min(1))
+    .max(MAX_ANSWERS)
+    .optional(),
+  answerImageUrls: z
+    .array(z.string().trim().min(1))
+    .max(MAX_ANSWERS)
+    .optional(),
+  addAnswersMode: z
+    .enum(['DISABLED', 'ONLY_CREATOR', 'ANYONE'])
+    .default('DISABLED'),
+  shouldAnswersSumToOne: z.boolean().optional(),
+});
+
+const createMultiNumericSchema = z.object({
+  outcomeType: z.enum(['MULTI_NUMERIC']),
+  answers: z.array(z.string().trim().min(1)).max(MAX_MULTI_NUMERIC_ANSWERS),
+  midpoints: z.array(z.number().safe()).max(MAX_MULTI_NUMERIC_ANSWERS),
+  shouldAnswersSumToOne: z.boolean(),
+  addAnswersMode: z.enum(['DISABLED']).default('DISABLED'),
+  unit: z.string(),
+});
+
+const createMultiDateSchema = z.object({
+  outcomeType: z.enum(['DATE']),
+  answers: z.array(z.string().trim().min(1)).max(MAX_MULTI_NUMERIC_ANSWERS),
+  midpoints: z.array(z.number().safe()).max(MAX_MULTI_NUMERIC_ANSWERS),
+  shouldAnswersSumToOne: z.boolean(),
+  addAnswersMode: z.enum(['DISABLED']).default('DISABLED'),
+  timezone: z.string(),
+});
+
+const createPollSchema = z.object({
+  outcomeType: z.enum(['POLL']),
+  answers: z.array(z.string().trim().min(1)).min(2).max(MAX_ANSWERS),
+  voterVisibility: z.enum(['creator', 'everyone']).optional(),
+});
+
+// Combined create market schema
+const CreateMarketSchema = z
+  .object({
+    question: z.string().min(1).max(120),
+    description: z.object({
       type: z.literal('doc'),
       content: z.array(z.any()),
-    })
-  ]).optional(),
-  closeTime: z.number().optional(), // Unix timestamp in milliseconds
-  visibility: z.enum(['public', 'unlisted']).optional(),
-  initialProb: z.number().min(1).max(99).optional(),
-  min: z.number().optional(),
-  max: z.number().optional(),
-  isLogScale: z.boolean().optional(),
-  initialValue: z.number().optional(),
-  answers: z.array(z.string()).optional(),
-  addAnswersMode: z.enum(['DISABLED', 'ONLY_CREATOR', 'ANYONE']).optional(),
-  shouldAnswersSumToOne: z.boolean().optional(),
-  totalBounty: z.number().optional(),
-  groupIds: z.array(z.string()).optional(),
-});
+    }).or(z.string()).optional(),
+    descriptionHtml: z.string().optional(),
+    descriptionMarkdown: z.string().optional(),
+    descriptionJson: z.string().optional(),
+    closeTime: z
+    .union([z.string(), z.number()])
+    .optional(),    visibility: z.enum(['public', 'unlisted']).default('public').optional(),
+    utcOffset: z.number().optional(),
+    extraLiquidity: z.number().min(1).optional(),
+    liquidityTier: z.union([z.literal(100), z.literal(1000), z.literal(10000), z.literal(100000)]),
+  })
+  .and(
+    z.union([
+      createMultiSchema,
+      createPollSchema,
+      createBinarySchema,
+      createMultiNumericSchema,
+      createMultiDateSchema,
+    ])
+  );
 
 const SearchMarketsSchema = z.object({
   term: z.string().optional(),
@@ -70,10 +124,6 @@ const GetUserSchema = z.object({
   username: z.string(),
 });
 
-const GetUserPositionsSchema = z.object({
-  userId: z.string(),
-});
-
 const SellSharesSchema = z.object({
   marketId: z.string(),
   outcome: z.enum(['YES', 'NO']).optional(),
@@ -87,11 +137,6 @@ const AddLiquiditySchema = z.object({
 
 const CancelBetSchema = z.object({
   betId: z.string(),
-});
-
-const UnresolveMarketSchema = z.object({
-  contractId: z.string(),
-  answerId: z.string().optional(),
 });
 
 const CloseMarketSchema = z.object({
@@ -138,6 +183,40 @@ const SendManaSchema = z.object({
   message: z.string().optional(),
 });
 
+export const coerceBoolean = z
+  .union([z.boolean(), z.literal('true'), z.literal('false')])
+  .transform(
+    (value) => value === true || value === 'true'
+  ) as z.ZodType<boolean>
+
+
+const GetBetsSchema = z
+  .object({
+    id: z.string().optional(),
+    userId: z.string().optional(),
+    username: z.string().optional(),
+    contractId: z.string().or(z.array(z.string())).optional(),
+    contractSlug: z.string().optional(),
+    answerId: z.string().optional(),
+    limit: z.coerce
+      .number()
+      .gte(0)
+      .lte(NON_POINTS_BETS_LIMIT)
+      .default(1000),
+    before: z.string().optional(),
+    after: z.string().optional(),
+    beforeTime: z.coerce.number().optional(),
+    afterTime: z.coerce.number().optional(),
+    order: z.enum(['asc', 'desc']).optional(),
+    kinds: z.enum(['open-limit']).optional(),
+    minAmount: z.coerce.number().positive().optional(),
+    // undocumented fields. idk what a good api interface would be
+    filterRedemptions: coerceBoolean.optional(),
+    includeZeroShareRedemptions: coerceBoolean.optional(),
+    count: coerceBoolean.optional(),
+  })
+  .strict();
+
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
@@ -149,66 +228,99 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           outcomeType: {
             type: 'string',
-            enum: ['BINARY', 'MULTIPLE_CHOICE', 'PSEUDO_NUMERIC', 'POLL', 'BOUNTIED_QUESTION'],
+            enum: ['BINARY', 'STONK', 'MULTIPLE_CHOICE', 'MULTI_NUMERIC', 'DATE', 'POLL'],
             description: 'Type of market to create'
           },
           question: {
             type: 'string',
-            description: 'The headline question for the market'
+            description: 'The headline question for the market (max 480 chars)'
           },
           description: {
             type: 'string',
             description: 'Optional description for the market'
           },
+          descriptionHtml: {
+            type: 'string',
+            description: 'Optional HTML description'
+          },
+          descriptionMarkdown: {
+            type: 'string',
+            description: 'Optional Markdown description'
+          },
+          descriptionJson: {
+            type: 'string',
+            description: 'Optional JSON description'
+          },
           closeTime: {
             type: 'string',
-            description: 'Optional. ISO timestamp when market will close. Defaults to 7 days.'
+            description: 'Optional. ISO string date when market will close'
           },
           visibility: {
             type: 'string',
             enum: ['public', 'unlisted'],
             description: 'Optional. Market visibility. Defaults to public.'
           },
+          extraLiquidity: {
+            type: 'number',
+            description: 'Optional. Extra liquidity to add (min 1)'
+          },
+          liquidityTier: {
+            type: 'number',
+            enum: [100, 1000, 10000, 100000],
+            description: 'Liquidity tier - determines initial market liquidity'
+          },
+          // BINARY/STONK specific
           initialProb: {
             type: 'number',
-            description: 'Required for BINARY markets. Initial probability (1-99)'
+            description: 'Optional for BINARY/STONK markets. Initial probability (1-99)'
           },
-          min: {
-            type: 'number',
-            description: 'Required for PSEUDO_NUMERIC markets. Minimum resolvable value'
-          },
-          max: {
-            type: 'number',
-            description: 'Required for PSEUDO_NUMERIC markets. Maximum resolvable value'
-          },
-          isLogScale: {
-            type: 'boolean',
-            description: 'Optional for PSEUDO_NUMERIC markets. If true, increases exponentially'
-          },
-          initialValue: {
-            type: 'number',
-            description: 'Required for PSEUDO_NUMERIC markets. Initial value between min and max'
-          },
+          // MULTIPLE_CHOICE specific
           answers: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Required for MULTIPLE_CHOICE/POLL markets. Array of possible answers'
+            description: 'Required for MULTIPLE_CHOICE/POLL/MULTI_NUMERIC/DATE markets. Array of answers'
+          },
+          answerShortTexts: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional for MULTIPLE_CHOICE markets. Short text for answers'
+          },
+          answerImageUrls: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional for MULTIPLE_CHOICE markets. Image URLs for answers'
           },
           addAnswersMode: {
             type: 'string',
             enum: ['DISABLED', 'ONLY_CREATOR', 'ANYONE'],
-            description: 'Optional for MULTIPLE_CHOICE markets. Controls who can add answers'
+            description: 'Optional for MULTIPLE_CHOICE markets. Who can add answers'
           },
           shouldAnswersSumToOne: {
             type: 'boolean',
-            description: 'Optional for MULTIPLE_CHOICE markets. Makes probabilities sum to 100%'
+            description: 'Optional for MULTIPLE_CHOICE markets. Whether probabilities sum to 100%'
           },
-          totalBounty: {
-            type: 'number',
-            description: 'Required for BOUNTIED_QUESTION markets. Amount of mana for bounty'
+          // MULTI_NUMERIC/DATE specific
+          midpoints: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Required for MULTI_NUMERIC/DATE markets. Array of midpoint values'
+          },
+          unit: {
+            type: 'string',
+            description: 'Required for MULTI_NUMERIC markets. Unit of measurement'
+          },
+          timezone: {
+            type: 'string',
+            description: 'Required for DATE markets. Timezone'
+          },
+          // POLL specific
+          voterVisibility: {
+            type: 'string',
+            enum: ['creator', 'everyone'],
+            description: 'Optional for POLL markets. Who can see voters'
           }
         },
-        required: ['outcomeType', 'question']
+        required: ['outcomeType', 'question', 'liquidityTier']
       }
     },
     {
@@ -244,6 +356,38 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           username: { type: 'string', description: 'Username' },
         },
         required: ['username'],
+      },
+    },
+    {
+      name: 'get_bets',
+      description: 'Get bets from markets or for users with various filtering options',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Optional. Bet ID to filter by' },
+          userId: { type: 'string', description: 'Optional. User ID to filter by' },
+          username: { type: 'string', description: 'Optional. Username to filter by' },
+          contractId: { 
+            oneOf: [
+              { type: 'string' },
+              { type: 'array', items: { type: 'string' } }
+            ],
+            description: 'Optional. Contract ID(s) to filter by'
+          },
+          contractSlug: { type: 'string', description: 'Optional. Contract slug to filter by' },
+          answerId: { type: 'string', description: 'Optional. Answer ID to filter by' },
+          limit: { type: 'number', minimum: 0, maximum: NON_POINTS_BETS_LIMIT, description: 'Optional. Number of bets to return (default: 1000)' },
+          before: { type: 'string', description: 'Optional. Get bets before this bet ID' },
+          after: { type: 'string', description: 'Optional. Get bets after this bet ID' },
+          beforeTime: { type: 'number', description: 'Optional. Get bets before this timestamp' },
+          afterTime: { type: 'number', description: 'Optional. Get bets after this timestamp' },
+          order: { type: 'string', enum: ['asc', 'desc'], description: 'Optional. Sort order by creation time' },
+          kinds: { type: 'string', enum: ['open-limit'], description: 'Optional. Filter by bet kind' },
+          minAmount: { type: 'number', minimum: 0, description: 'Optional. Minimum bet amount' },
+          filterRedemptions: { type: 'boolean', description: 'Optional. Filter redemptions' },
+          includeZeroShareRedemptions: { type: 'boolean', description: 'Optional. Include zero share redemptions' },
+        },
+        required: [],
       },
     },
     {
@@ -300,29 +444,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'get_positions',
-      description: 'Get user positions across markets',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          userId: { type: 'string', description: 'User ID' },
-        },
-        required: ['userId'],
-      },
-    },
-    {
-      name: 'unresolve_market',
-      description: 'Unresolve a previously resolved market',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          contractId: { type: 'string', description: 'Market ID' },
-          answerId: { type: 'string', description: 'Optional. Answer ID for multiple choice markets' }
-        },
-        required: ['contractId']
-      }
-    },
-    {
       name: 'close_market',
       description: 'Close a market for trading',
       inputSchema: {
@@ -356,31 +477,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           follow: { type: 'boolean', description: 'True to follow, false to unfollow' }
         },
         required: ['contractId', 'follow']
-      }
-    },
-    {
-      name: 'add_bounty',
-      description: 'Add bounty to a market',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          contractId: { type: 'string', description: 'Market ID' },
-          amount: { type: 'number', description: 'Amount of mana to add as bounty' }
-        },
-        required: ['contractId', 'amount']
-      }
-    },
-    {
-      name: 'award_bounty',
-      description: 'Award bounty to a comment',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          contractId: { type: 'string', description: 'Market ID' },
-          commentId: { type: 'string', description: 'Comment ID to award bounty to' },
-          amount: { type: 'number', description: 'Amount of bounty to award' }
-        },
-        required: ['contractId', 'commentId', 'amount']
       }
     },
     {
@@ -448,35 +544,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Validate required fields based on market type
         switch (params.outcomeType) {
           case 'BINARY':
-            if (!params.initialProb) {
-              throw new McpError(
-                ErrorCode.InvalidParams,
-                'initialProb is required for BINARY markets'
-              );
-            }
-            break;
-          case 'PSEUDO_NUMERIC':
-            if (!params.min || !params.max || !params.initialValue) {
-              throw new McpError(
-                ErrorCode.InvalidParams,
-                'min, max, and initialValue are required for PSEUDO_NUMERIC markets'
-              );
-            }
+          case 'STONK':
+            // initialProb is optional for BINARY/STONK
             break;
           case 'MULTIPLE_CHOICE':
-          case 'POLL':
-            if (!params.answers || !Array.isArray(params.answers)) {
+            if (!params.answers || !Array.isArray(params.answers) || params.answers.length === 0) {
               throw new McpError(
                 ErrorCode.InvalidParams,
-                'answers array is required for MULTIPLE_CHOICE/POLL markets'
+                'answers array is required for MULTIPLE_CHOICE markets'
               );
             }
             break;
-          case 'BOUNTIED_QUESTION':
-            if (!params.totalBounty) {
+          case 'MULTI_NUMERIC':
+            if (!params.answers || !Array.isArray(params.answers) || 
+                !params.midpoints || !Array.isArray(params.midpoints) ||
+                params.shouldAnswersSumToOne === undefined || !params.unit) {
               throw new McpError(
                 ErrorCode.InvalidParams,
-                'totalBounty is required for BOUNTIED_QUESTION markets'
+                'answers, midpoints, shouldAnswersSumToOne, and unit are required for MULTI_NUMERIC markets'
+              );
+            }
+            break;
+          case 'DATE':
+            if (!params.answers || !Array.isArray(params.answers) || 
+                !params.midpoints || !Array.isArray(params.midpoints) ||
+                params.shouldAnswersSumToOne === undefined || !params.timezone) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'answers, midpoints, shouldAnswersSumToOne, and timezone are required for DATE markets'
+              );
+            }
+            break;
+          case 'POLL':
+            if (!params.answers || !Array.isArray(params.answers) || params.answers.length < 2) {
+              throw new McpError(
+                ErrorCode.InvalidParams,
+                'answers array with at least 2 items is required for POLL markets'
               );
             }
             break;
@@ -498,6 +601,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             ]
           };
+        }
+
+        // Convert ISO string closeTime to timestamp number if needed
+        if (params.closeTime && typeof params.closeTime === 'string') {
+          params.closeTime = new Date(params.closeTime).getTime();
         }
 
         const response = await fetch(`${API_BASE}/v0/market`, {
@@ -600,6 +708,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(user, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_bets': {
+        const params = GetBetsSchema.parse(args);
+        
+        // Build query parameters
+        const queryParams = new URLSearchParams();
+        
+        if (params.id) queryParams.append('id', params.id);
+        if (params.userId) queryParams.append('userId', params.userId);
+        if (params.username) queryParams.append('username', params.username);
+        if (params.contractId) {
+          if (Array.isArray(params.contractId)) {
+            params.contractId.forEach(id => queryParams.append('contractId', id));
+          } else {
+            queryParams.append('contractId', params.contractId);
+          }
+        }
+        if (params.contractSlug) queryParams.append('contractSlug', params.contractSlug);
+        if (params.answerId) queryParams.append('answerId', params.answerId);
+        if (params.limit !== undefined) queryParams.append('limit', params.limit.toString());
+        if (params.before) queryParams.append('before', params.before);
+        if (params.after) queryParams.append('after', params.after);
+        if (params.beforeTime) queryParams.append('beforeTime', params.beforeTime.toString());
+        if (params.afterTime) queryParams.append('afterTime', params.afterTime.toString());
+        if (params.order) queryParams.append('order', params.order);
+        if (params.kinds) queryParams.append('kinds', params.kinds);
+        if (params.minAmount) queryParams.append('minAmount', params.minAmount.toString());
+        if (params.filterRedemptions !== undefined) queryParams.append('filterRedemptions', params.filterRedemptions.toString());
+        if (params.includeZeroShareRedemptions !== undefined) queryParams.append('includeZeroShareRedemptions', params.includeZeroShareRedemptions.toString());
+
+        const url = `${API_BASE}/v0/bets${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+        const response = await fetch(url, {
+          headers: { Accept: 'application/json' },
+        });
+
+        if (!response.ok) {
+          throw new McpError(
+            ErrorCode.InternalError,
+            `Manifold API error: ${response.statusText}`
+          );
+        }
+
+        const bets = await response.json();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(bets, null, 2),
             },
           ],
         };
@@ -759,67 +919,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'get_positions': {
-        const { userId } = GetUserPositionsSchema.parse(args);
-        const response = await fetch(
-          `${API_BASE}/v0/bets?userId=${userId}`,
-          { headers: { Accept: 'application/json' } }
-        );
-
-        if (!response.ok) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            `Manifold API error: ${response.statusText}`
-          );
-        }
-
-        const positions = await response.json();
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(positions, null, 2),
-            },
-          ],
-        };
-      }
-
-      case 'unresolve_market': {
-        const params = UnresolveMarketSchema.parse(args);
-        const apiKey = process.env.MANIFOLD_API_KEY;
-        if (!apiKey) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            'MANIFOLD_API_KEY environment variable is required'
-          );
-        }
-
-        const response = await fetch(`${API_BASE}/v0/unresolve`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Key ${apiKey}`,
-          },
-          body: JSON.stringify(params),
-        });
-
-        if (!response.ok) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            `Manifold API error: ${response.statusText}`
-          );
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Market unresolved successfully',
-            },
-          ],
-        };
-      }
-
       case 'close_market': {
         const params = CloseMarketSchema.parse(args);
         const apiKey = process.env.MANIFOLD_API_KEY;
@@ -931,83 +1030,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: params.follow ? 'Now following market' : 'Unfollowed market',
-            },
-          ],
-        };
-      }
-
-      case 'add_bounty': {
-        const params = AddBountySchema.parse(args);
-        const apiKey = process.env.MANIFOLD_API_KEY;
-        if (!apiKey) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            'MANIFOLD_API_KEY environment variable is required'
-          );
-        }
-
-        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/add-bounty`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Key ${apiKey}`,
-          },
-          body: JSON.stringify({
-            amount: params.amount,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            `Manifold API error: ${response.statusText}`
-          );
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Bounty added successfully',
-            },
-          ],
-        };
-      }
-
-      case 'award_bounty': {
-        const params = AwardBountySchema.parse(args);
-        const apiKey = process.env.MANIFOLD_API_KEY;
-        if (!apiKey) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            'MANIFOLD_API_KEY environment variable is required'
-          );
-        }
-
-        const response = await fetch(`${API_BASE}/v0/market/${params.contractId}/award-bounty`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Key ${apiKey}`,
-          },
-          body: JSON.stringify({
-            commentId: params.commentId,
-            amount: params.amount,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new McpError(
-            ErrorCode.InternalError,
-            `Manifold API error: ${response.statusText}`
-          );
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: 'Bounty awarded successfully',
             },
           ],
         };

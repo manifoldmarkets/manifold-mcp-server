@@ -26,8 +26,6 @@ The server implements a complete mapping of Manifold Markets' API capabilities t
 #### Market Interaction
 - `follow_market`: Track markets of interest
 - `react`: Like/dislike markets and comments
-- `add_bounty`: Add bounties for analysis
-- `award_bounty`: Reward valuable contributions
 
 #### Trading Operations
 - `place_bet`: Execute market trades
@@ -42,7 +40,7 @@ The server implements a complete mapping of Manifold Markets' API capabilities t
 - `search_markets`: Find markets with filters
 - `get_market`: Detailed market information
 - `get_user`: User profile data
-- `get_positions`: Portfolio tracking
+- `get_bets`: Get user or market bets
 
 #### Social Features
 - `send_mana`: Transfer mana between users
@@ -143,7 +141,7 @@ Add to `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude
 Create a new prediction market:
 ```typescript
 {
-  outcomeType: 'BINARY' | 'MULTIPLE_CHOICE' | 'PSEUDO_NUMERIC' | 'POLL' | 'BOUNTIED_QUESTION'
+  outcomeType: 'BINARY' | 'MULTIPLE_CHOICE' | 'POLL'
   question: string
   description?: string | {
     type: 'doc'
@@ -152,23 +150,9 @@ Create a new prediction market:
   closeTime?: number // Unix timestamp ms
   visibility?: 'public' | 'unlisted'
   initialProb?: number // Required for BINARY (1-99)
-  min?: number // Required for PSEUDO_NUMERIC
-  max?: number // Required for PSEUDO_NUMERIC
-  isLogScale?: boolean
-  initialValue?: number // Required for PSEUDO_NUMERIC
   answers?: string[] // Required for MULTIPLE_CHOICE/POLL
   addAnswersMode?: 'DISABLED' | 'ONLY_CREATOR' | 'ANYONE'
   shouldAnswersSumToOne?: boolean
-  totalBounty?: number // Required for BOUNTIED_QUESTION
-}
-```
-
-#### unresolve_market
-Unresolve a previously resolved market:
-```typescript
-{
-  contractId: string
-  answerId?: string // For multiple choice markets
 }
 ```
 
